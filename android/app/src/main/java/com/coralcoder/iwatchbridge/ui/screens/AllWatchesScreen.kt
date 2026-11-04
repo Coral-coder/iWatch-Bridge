@@ -79,7 +79,7 @@ private fun WatchRow(w: WatchRecord, active: Boolean, onSelect: () -> Unit, onIn
         WatchIllustration(Modifier.size(52.dp), ultra = w.model.contains("Ultra"), showRings = false)
         Column(Modifier.weight(1f)) {
             Text(w.name, style = MaterialTheme.typography.bodyLarge, color = Ios.colors.label)
-            Text(listOf(w.model, w.osVersion.takeIf { it.isNotEmpty() }?.let { "watchOS $it" }).filterNotNull().filter { it.isNotEmpty() }.joinToString(" · "),
+            Text(listOf(if (w.mode == com.coralcoder.iwatchbridge.protocol.registry.LinkMode.SHARED) "Shared with iPhone" else null, w.model, w.osVersion.takeIf { it.isNotEmpty() }?.let { "watchOS $it" }).filterNotNull().filter { it.isNotEmpty() }.joinToString(" · "),
                 style = MaterialTheme.typography.labelMedium, color = Ios.colors.secondaryLabel)
         }
         if (active) Icon(Icons.Filled.Check, "Active", tint = Ios.colors.tint, modifier = Modifier.size(20.dp))

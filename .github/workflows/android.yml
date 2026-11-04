@@ -86,6 +86,12 @@ jobs:
           echo "apk=$RUNNER_TEMP/$apk" >> "$GITHUB_OUTPUT"
 
       - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: screenshots
+          path: android/app/build/screenshots/*.png
+
+      - uses: actions/upload-artifact@v4
         with:
           name: debug-apk
           path: android/app/build/outputs/apk/debug/*.apk
