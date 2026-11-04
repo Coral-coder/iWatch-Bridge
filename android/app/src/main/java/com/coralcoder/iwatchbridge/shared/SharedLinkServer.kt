@@ -108,6 +108,7 @@ class SharedLinkServer(
             advertiseCallback,
         )
         _state.value = State(running = true)
+        com.coralcoder.iwatchbridge.service.BridgeService.startIfNeeded(context)
 
         jobs += scope.launch {
             var sent = emptySet<String>()

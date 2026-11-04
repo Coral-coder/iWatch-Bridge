@@ -52,9 +52,40 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
-        runCatching { BridgeService.start(this) }
-        setContent { BridgeTheme { App() } }
+        BridgeService.startIfNeeded(this)
+        val crash = com.coralcoder.iwatchbridge.core.CrashLog.take(this)
+        setContent {
+            BridgeTheme {
+                App()
+                if (crash != null) CrashReport(crash)
+            }
+        }
     }
+}
+
+/** Shown once after a crash, with a button to share the report. */
+@Composable
+private fun CrashReport(report: String) {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    var open by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(true) }
+    if (!open) return
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = { open = false },
+        title = { Text("Watch closed unexpectedly") },
+        text = { Text("Sharing the crash report helps fix it.\n\n" + report.lineSequence().take(6).joinToString("\n"), fontSize = 12.sp) },
+        confirmButton = {
+            androidx.compose.material3.TextButton(onClick = {
+                open = false
+                ctx.startActivity(android.content.Intent.createChooser(
+                    android.content.Intent(android.content.Intent.ACTION_SEND).setType("text/plain")
+                        .putExtra(android.content.Intent.EXTRA_SUBJECT, "iWatch Bridge crash report")
+                        .putExtra(android.content.Intent.EXTRA_TEXT, report),
+                    "Share crash report",
+                ))
+            }) { Text("Share") }
+        },
+        dismissButton = { androidx.compose.material3.TextButton(onClick = { open = false }) { Text("Close") } },
+    )
 }
 
 private enum class Tab(val title: String, val icon: ImageVector) {

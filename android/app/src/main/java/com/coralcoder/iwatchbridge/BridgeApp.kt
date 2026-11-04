@@ -9,6 +9,7 @@ class BridgeApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        com.coralcoder.iwatchbridge.core.CrashLog.install(this)
         controller = BridgeController(this)
     }
 }

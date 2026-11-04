@@ -27,8 +27,16 @@ class BridgeService : LifecycleService() {
         super.onCreate()
         val nm = getSystemService(NotificationManager::class.java)
         nm.createNotificationChannel(NotificationChannel(CHANNEL, getString(R.string.service_channel), NotificationManager.IMPORTANCE_MIN))
-        ServiceCompat.startForeground(this, 1, build("Starting…"),
-            if (Build.VERSION.SDK_INT >= 29) ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE else 0)
+        try {
+            ServiceCompat.startForeground(this, 1, build("Starting…"),
+                if (Build.VERSION.SDK_INT >= 29) ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE else 0)
+        } catch (e: Exception) {
+            // Android refused the foreground service (missing prerequisite permission, or the app
+            // was in the background). Don't take the app down with it; the link runs while the app is open.
+            android.util.Log.w("BridgeService", "startForeground refused", e)
+            stopSelf()
+            return
+        }
         lifecycleScope.launch {
             combine(bridge.registry.state, bridge.radio) { reg, radio ->
                 val watch = reg.active?.name ?: "No watch paired"
@@ -48,6 +56,15 @@ class BridgeService : LifecycleService() {
 
     companion object {
         private const val CHANNEL = "link"
-        fun start(context: Context) = context.startForegroundService(Intent(context, BridgeService::class.java))
+        /** Keep the link alive in the background, but only when there is something to keep alive. */
+        fun startIfNeeded(context: Context) {
+            val b = (context.applicationContext as com.coralcoder.iwatchbridge.BridgeApp).controller
+            if (b.registry.state.value.watches.isEmpty() && !b.shared.enabled) return
+            try {
+                context.startForegroundService(Intent(context, BridgeService::class.java))
+            } catch (e: Exception) {
+                android.util.Log.w("BridgeService", "couldn't start", e)
+            }
+        }
     }
 }
