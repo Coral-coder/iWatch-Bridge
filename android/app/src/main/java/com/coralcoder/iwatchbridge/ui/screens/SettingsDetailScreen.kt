@@ -14,6 +14,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.core.app.NotificationManagerCompat
 import com.coralcoder.iwatchbridge.bridge
 import com.coralcoder.iwatchbridge.core.NotificationQueue
+import com.coralcoder.iwatchbridge.protocol.registry.LinkMode
 import com.coralcoder.iwatchbridge.service.NotificationRelayService
 import com.coralcoder.iwatchbridge.ui.components.ListPadding
 import com.coralcoder.iwatchbridge.ui.components.ListRow
@@ -68,8 +69,22 @@ fun SettingsDetailScreen(key: String, onBack: () -> Unit) {
     val entry = (SystemSettings + ExperienceSettings + AppSettings).firstOrNull { it.key == key }
     val title = entry?.title ?: key
     if (key == "notifications") { NotificationsScreen(onBack); return }
+    if (key == "shared") { SharedSetupScreen(onBack); return }
     val bridge = LocalContext.current.bridge
-    val watchId = bridge.registry.state.collectAsState().value.activeId ?: return
+    val active = bridge.registry.state.collectAsState().value.active ?: return
+    val watchId = active.id
+    if (active.mode == LinkMode.SHARED) {
+        Column(Modifier.fillMaxSize()) {
+            NavBar(title, back = "My Watch", onBack = onBack)
+            LazyColumn(Modifier.fillMaxSize(), contentPadding = ListPadding) {
+                section(
+                    footer = "${active.name} is paired to an iPhone, so its settings are changed in the Watch app on that iPhone. This phone adds notifications, music control and Find My Phone through the Bridge watch app.",
+                    rows = listOf { ListRow("Managed by iPhone", chevron = false) },
+                )
+            }
+        }
+        return
+    }
     val values by bridge.settings.values.collectAsState()
     val pending by bridge.settings.pending.collectAsState()
     Column(Modifier.fillMaxSize()) {
@@ -117,6 +132,43 @@ private fun NotificationsScreen(onBack: () -> Unit) {
                     @Composable { ToggleRow(name, pkg !in muted) { on -> NotificationQueue.mutedApps.value = if (on) muted - pkg else muted + pkg } }
                 })
             }
+        }
+    }
+}
+
+/** Shared-with-iPhone setup: start the phone side, then open Bridge on the watch. */
+@Composable
+private fun SharedSetupScreen(onBack: () -> Unit) {
+    val ctx = LocalContext.current
+    val bridge = ctx.bridge
+    val shared by bridge.shared.state.collectAsState()
+    val ask = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.RequestMultiplePermissions()) { r ->
+        if (r.values.all { it }) bridge.shared.start()
+    }
+    Column(Modifier.fillMaxSize()) {
+        NavBar("Shared with iPhone", back = "Back", onBack = onBack)
+        LazyColumn(Modifier.fillMaxSize(), contentPadding = ListPadding) {
+            section(
+                header = "How it works",
+                footer = "Your watch stays paired to your iPhone with all its native features. The Bridge app on the watch connects to this phone over Bluetooth for notifications, music control and Find My Phone.",
+                rows = listOf(
+                    @Composable { ListRow("1. Install Bridge on the watch", subtitle = "From the iPhone's Watch app, or TestFlight", chevron = false) },
+                    @Composable { ListRow("2. Start sharing on this phone", subtitle = "Below", chevron = false) },
+                    @Composable { ListRow("3. Open Bridge on the watch", subtitle = "It finds this phone and appears in My Watch", chevron = false) },
+                ),
+            )
+            section(rows = listOf(
+                @Composable { ListRow("Status", value = shared.status, chevron = false) },
+                @Composable {
+                    ListRow(if (shared.running) "Stop Sharing" else "Start Sharing", tint = !shared.running, destructive = shared.running, chevron = false, onClick = {
+                        when {
+                            shared.running -> bridge.shared.stop()
+                            android.os.Build.VERSION.SDK_INT >= 31 -> ask.launch(arrayOf(android.Manifest.permission.BLUETOOTH_ADVERTISE, android.Manifest.permission.BLUETOOTH_CONNECT))
+                            else -> bridge.shared.start()
+                        }
+                    })
+                },
+            ))
         }
     }
 }

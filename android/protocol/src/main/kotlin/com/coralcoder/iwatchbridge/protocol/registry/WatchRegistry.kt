@@ -33,7 +33,15 @@ data class WatchRecord(
     val secretsRef: String = "",
     val activationState: ActivationState = ActivationState.UNKNOWN,
     val familyMember: String? = null,   // Family Setup watches are managed, not "worn by" this phone's owner
+    val mode: LinkMode = LinkMode.PRIMARY,
 )
+
+/**
+ * PRIMARY: this phone is the watch's companion (replaces the iPhone).
+ * SHARED: the watch stays paired to an iPhone; this phone links through the watch app.
+ */
+@Serializable
+enum class LinkMode { PRIMARY, SHARED }
 
 @Serializable
 enum class ActivationState { UNKNOWN, NEEDS_ACTIVATION, ACTIVATION_LOCKED, ACTIVATED }

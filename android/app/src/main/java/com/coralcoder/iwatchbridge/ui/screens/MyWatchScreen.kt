@@ -81,7 +81,7 @@ fun MyWatchScreen(onAllWatches: () -> Unit, onPair: () -> Unit, onSetting: (Stri
     val reg by ctx.bridge.registry.state.collectAsState()
     val active = reg.active
     if (active == null) {
-        StartPairing(onPair)
+        StartPairing(onPair, onShared = { onSetting("shared") })
         return
     }
     LazyColumn(Modifier.fillMaxSize(), contentPadding = ListPadding) {
@@ -102,7 +102,7 @@ private fun WatchHeader(w: WatchRecord) {
         WatchIllustration(Modifier.size(150.dp), ultra = w.model.contains("Ultra"))
         VSpace(8.dp)
         Text(w.name, style = MaterialTheme.typography.titleLarge, color = Ios.colors.label)
-        val sub = listOf(w.model, if (w.caseSizeMm > 0) "${w.caseSizeMm}mm" else "", if (w.osVersion.isNotEmpty()) "watchOS ${w.osVersion}" else "")
+        val sub = listOf(if (w.mode == com.coralcoder.iwatchbridge.protocol.registry.LinkMode.SHARED) "Shared with iPhone" else "", w.model, if (w.caseSizeMm > 0) "${w.caseSizeMm}mm" else "", if (w.osVersion.isNotEmpty()) "watchOS ${w.osVersion}" else "")
             .filter { it.isNotEmpty() }.joinToString(" · ")
         if (sub.isNotEmpty()) Text(sub, style = MaterialTheme.typography.bodyMedium, color = Ios.colors.secondaryLabel)
     }
@@ -110,7 +110,7 @@ private fun WatchHeader(w: WatchRecord) {
 
 /** Shown when no watch is paired: the iPhone's "Start Pairing" screen. */
 @Composable
-private fun StartPairing(onPair: () -> Unit) {
+private fun StartPairing(onPair: () -> Unit, onShared: () -> Unit) {
     Box(Modifier.fillMaxSize().padding(24.dp)) {
         Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
             WatchIllustration(Modifier.size(180.dp))
@@ -120,7 +120,7 @@ private fun StartPairing(onPair: () -> Unit) {
         }
         Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
             PrimaryButton("Start Pairing", onClick = onPair)
-            VSpace(12.dp)
+            com.coralcoder.iwatchbridge.ui.components.TextButton("Use a Watch Paired to My iPhone", onClick = onShared)
         }
     }
 }

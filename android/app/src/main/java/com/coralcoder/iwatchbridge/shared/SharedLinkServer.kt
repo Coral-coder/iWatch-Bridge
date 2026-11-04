@@ -48,7 +48,12 @@ import java.util.concurrent.LinkedBlockingQueue
  * other Bluetooth devices. Several watches can be connected at once.
  */
 @SuppressLint("MissingPermission") // checked by the UI before start()
-class SharedLinkServer(private val context: Context, private val scope: CoroutineScope) {
+class SharedLinkServer(
+    private val context: Context,
+    private val scope: CoroutineScope,
+    /** Called when a watch app introduces itself, so it can be listed with the paired watches. */
+    private val onWatchHello: (Message.WatchHello) -> Unit = {},
+) {
     data class WatchConn(val address: String, val name: String = "Apple Watch", val model: String = "", val os: String = "", val battery: Int = -1, val subscribed: Boolean = false)
     data class State(val running: Boolean = false, val watches: Map<String, WatchConn> = emptyMap(), val error: String? = null) {
         val status: String get() = when {
@@ -77,8 +82,13 @@ class SharedLinkServer(private val context: Context, private val scope: Coroutin
         override fun onStartFailure(errorCode: Int) { _state.value = _state.value.copy(error = "Couldn't advertise (error $errorCode)") }
     }
 
+    private val prefs = context.getSharedPreferences("shared_link", Context.MODE_PRIVATE)
+    /** Whether the user left sharing on; restored at app start and after reboot. */
+    val enabled get() = prefs.getBoolean("enabled", false)
+
     fun start() {
         if (_state.value.running) return
+        prefs.edit().putBoolean("enabled", true).apply()
         val adapter = manager?.adapter
         if (adapter == null || !adapter.isEnabled) { _state.value = State(error = "Turn on Bluetooth"); return }
         val s = manager.openGattServer(context, callback) ?: run { _state.value = State(error = "Bluetooth GATT unavailable"); return }
@@ -117,6 +127,11 @@ class SharedLinkServer(private val context: Context, private val scope: Coroutin
     }
 
     fun stop() {
+        prefs.edit().putBoolean("enabled", false).apply()
+        shutdown()
+    }
+
+    private fun shutdown() {
         jobs.forEach { it.cancel() }; jobs.clear()
         runCatching { manager?.adapter?.bluetoothLeAdvertiser?.stopAdvertising(advertiseCallback) }
         runCatching { server?.close() }
@@ -158,6 +173,7 @@ class SharedLinkServer(private val context: Context, private val scope: Coroutin
         when (m) {
             is Message.WatchHello -> {
                 update(address) { it.copy(name = m.name, model = m.model, os = m.os, battery = m.battery) }
+                onWatchHello(m)
                 send(address, phoneStatus())
                 NotificationQueue.items.value.forEach { n ->
                     send(address, Message.Notification(n.key, n.app, n.appName, n.title, n.body, n.postedAt, NotificationRelayService.canReply(n.key)))

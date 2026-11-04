@@ -51,7 +51,18 @@ class BridgeController(private val context: Context) {
     val settings = WatchSettings(context)
 
     /** Shared-with-iPhone mode: the watch app's Bluetooth LE link to this phone. */
-    val shared = com.coralcoder.iwatchbridge.shared.SharedLinkServer(context, scope)
+    val shared = com.coralcoder.iwatchbridge.shared.SharedLinkServer(context, scope) { hello ->
+        // The watch's Bluetooth address rotates, so a shared watch is identified by name + model.
+        val id = "shared:" + (hello.name + "|" + hello.model).hashCode().toUInt().toString(16)
+        val existing = registry.state.value.watches.firstOrNull { it.id == id }
+        registry.upsert(
+            (existing ?: com.coralcoder.iwatchbridge.protocol.registry.WatchRecord(id = id, name = hello.name, pairedAtEpochMs = System.currentTimeMillis()))
+                .copy(name = hello.name, model = hello.model, osVersion = hello.os,
+                    mode = com.coralcoder.iwatchbridge.protocol.registry.LinkMode.SHARED,
+                    activationState = com.coralcoder.iwatchbridge.protocol.registry.ActivationState.ACTIVATED),
+        )
+        registry.markConnected(id)
+    }
 
     enum class Radio(val label: String) {
         USB("USB Bluetooth adapter"),
@@ -96,6 +107,13 @@ class BridgeController(private val context: Context) {
             android.provider.Settings.Global.getString(context.contentResolver, "device_name")
         }.getOrNull()
         return owner?.takeIf { it.isNotBlank() } ?: "${Build.MODEL}"
+    }
+
+    init {
+        // Resume sharing if it was on (permissions were granted when it was turned on).
+        val canConnect = android.os.Build.VERSION.SDK_INT < 31 ||
+            context.checkSelfPermission(android.Manifest.permission.BLUETOOTH_CONNECT) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        if (shared.enabled && canConnect) runCatching { shared.start() }
     }
 
     fun usbAdapters() = UsbHciTransport.adapters(context.getSystemService(UsbManager::class.java))
