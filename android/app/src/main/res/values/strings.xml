@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">Watch</string>
+    <string name="notification_relay">Watch notifications</string>
+    <string name="service_channel">Apple Watch connection</string>
+</resources>

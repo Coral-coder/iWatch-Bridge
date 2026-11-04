@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Standard USB Bluetooth controllers: Wireless Controller / RF / Bluetooth Programming Interface -->
+<resources>
+    <usb-device class="224" subclass="1" protocol="1" />
+</resources>

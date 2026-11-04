@@ -1,0 +1,15 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
+    <!-- band -->
+    <path android:fillColor="#FF3A3A3C" android:pathData="M44,24h20v12h-20z M44,72h20v12h-20z"/>
+    <!-- case -->
+    <path android:fillColor="#FF1C1C1E" android:strokeColor="#FFD1D1D6" android:strokeWidth="2"
+        android:pathData="M42,34h24a8,8 0,0 1,8 8v24a8,8 0,0 1,-8 8h-24a8,8 0,0 1,-8 -8v-24a8,8 0,0 1,8 -8z"/>
+    <!-- crown -->
+    <path android:fillColor="#FFD1D1D6" android:pathData="M74,46h3a1,1 0,0 1,1 1v6a1,1 0,0 1,-1 1h-3z"/>
+    <!-- face: activity rings -->
+    <path android:strokeColor="#FFFA114F" android:strokeWidth="3" android:fillColor="#00000000"
+        android:pathData="M54,44a10,10 0,1 1,-0.01 0z"/>
+    <path android:strokeColor="#FF92E82A" android:strokeWidth="3" android:fillColor="#00000000"
+        android:pathData="M54,48a6,6 0,1 1,-0.01 0z"/>
+</vector>
