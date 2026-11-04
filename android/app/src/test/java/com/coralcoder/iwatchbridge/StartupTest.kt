@@ -37,6 +37,15 @@ class StartupTest {
         Robolectric.buildService(BridgeService::class.java, Intent(app, BridgeService::class.java)).create().get()
     }
 
+    @Test fun startsWithSharingLeftOn() {
+        org.robolectric.Shadows.shadowOf(app).grantPermissions(
+            android.Manifest.permission.BLUETOOTH_CONNECT, android.Manifest.permission.BLUETOOTH_ADVERTISE)
+        app.getSharedPreferences("shared_link", android.content.Context.MODE_PRIVATE).edit().putBoolean("enabled", true).commit()
+        // A controller built while sharing is on resumes it during construction; that must not throw.
+        com.coralcoder.iwatchbridge.core.BridgeController(app)
+        ActivityScenario.launch(MainActivity::class.java).use { }
+    }
+
     @Test fun reportsThePreviousCrashOnce() {
         java.io.File(app.filesDir, "last_crash.txt").writeText("boom")
         assertEquals("boom", com.coralcoder.iwatchbridge.core.CrashLog.take(app))

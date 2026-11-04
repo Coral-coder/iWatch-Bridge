@@ -60,6 +60,11 @@ class BridgeService : LifecycleService() {
         fun startIfNeeded(context: Context) {
             val b = (context.applicationContext as com.coralcoder.iwatchbridge.BridgeApp).controller
             if (b.registry.state.value.watches.isEmpty() && !b.shared.enabled) return
+            startNow(context)
+        }
+
+        /** Start without consulting app state (safe while the controller is still being built). */
+        fun startNow(context: Context) {
             try {
                 context.startForegroundService(Intent(context, BridgeService::class.java))
             } catch (e: Exception) {
