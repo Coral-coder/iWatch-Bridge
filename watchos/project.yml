@@ -9,8 +9,8 @@ options:
     watchOS: "10.0"
 settings:
   base:
-    MARKETING_VERSION: "0.1.0"
-    CURRENT_PROJECT_VERSION: "2"
+    MARKETING_VERSION: "0.2.0"
+    CURRENT_PROJECT_VERSION: "1"
     SWIFT_VERSION: "5.0"
     CODE_SIGN_STYLE: Automatic
 targets:
@@ -28,6 +28,10 @@ targets:
       path: PhoneApp/Info.plist
       properties:
         CFBundleDisplayName: iWatch Bridge
+        # Take the build/version from the CI-provided build settings so the iOS app and the
+        # embedded watch app always carry the same, incrementing numbers (Apple requires both).
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
         UILaunchScreen: {}
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
         ITSAppUsesNonExemptEncryption: false
@@ -52,6 +56,8 @@ targets:
       path: WatchApp/Info.plist
       properties:
         CFBundleDisplayName: Bridge
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
         WKApplication: true
         WKCompanionAppBundleIdentifier: com.coralcoder.iwatchbridge
         NSBluetoothAlwaysUsageDescription: Bridge connects to your Android phone over Bluetooth to show its notifications and control its music.
