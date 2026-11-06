@@ -38,6 +38,10 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.coralcoder.iwatchbridge.service.BridgeService
+import androidx.compose.runtime.collectAsState
+import com.coralcoder.iwatchbridge.bridge
+import kotlinx.coroutines.launch
+import androidx.compose.foundation.layout.statusBars
 import com.coralcoder.iwatchbridge.ui.screens.AllWatchesScreen
 import com.coralcoder.iwatchbridge.ui.screens.BridgeScreen
 import com.coralcoder.iwatchbridge.ui.screens.FaceGalleryScreen
@@ -94,6 +98,46 @@ private enum class Tab(val title: String, val icon: ImageVector) {
     BRIDGE("Bridge", Icons.Filled.Explore),
 }
 
+/** A thin banner at the top when a newer build is available, with a one-tap install. */
+@Composable
+private fun UpdateBanner() {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    val bridge = ctx.bridge
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    val state by bridge.updater.state.collectAsState()
+    val s = state
+    val text: String?
+    val action: (() -> Unit)?
+    val actionLabel: String
+    when (s) {
+        is com.coralcoder.iwatchbridge.core.Updater.State.Available -> {
+            text = "Update available — ${s.versionName}"; actionLabel = "Install"
+            action = { scope.launch { bridge.updater.downloadAndInstall(s.apkUrl) } }
+        }
+        is com.coralcoder.iwatchbridge.core.Updater.State.Downloading -> {
+            text = "Downloading update… ${s.percent}%"; actionLabel = ""; action = null
+        }
+        is com.coralcoder.iwatchbridge.core.Updater.State.Error -> {
+            text = s.message; actionLabel = "Dismiss"; action = { bridge.updater.dismiss() }
+        }
+        else -> { text = null; actionLabel = ""; action = null }
+    }
+    if (text == null) return
+    androidx.compose.foundation.layout.Row(
+        Modifier.fillMaxWidth().background(Ios.colors.tint)
+            .windowInsetsPadding(androidx.compose.foundation.layout.WindowInsets.statusBars)
+            .padding(horizontal = 16.dp, vertical = 10.dp),
+        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+    ) {
+        Text(text, color = androidx.compose.ui.graphics.Color.White, style = androidx.compose.material3.MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+        if (action != null && actionLabel.isNotEmpty()) {
+            Text(actionLabel, color = androidx.compose.ui.graphics.Color.White,
+                style = androidx.compose.material3.MaterialTheme.typography.titleMedium,
+                modifier = Modifier.clickable(onClick = action).padding(start = 12.dp))
+        }
+    }
+}
+
 @Composable
 private fun App() {
     val nav = rememberNavController()
@@ -101,6 +145,7 @@ private fun App() {
     NavHost(nav, startDestination = "tabs", modifier = Modifier.fillMaxSize().background(Ios.colors.groupedBackground)) {
         composable("tabs") {
             Column(Modifier.fillMaxSize()) {
+                UpdateBanner()
                 Box(Modifier.weight(1f)) {
                     when (Tab.entries[tab]) {
                         Tab.MY_WATCH -> MyWatchScreen(

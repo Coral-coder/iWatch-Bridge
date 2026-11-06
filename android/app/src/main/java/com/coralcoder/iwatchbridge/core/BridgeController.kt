@@ -51,6 +51,9 @@ class BridgeController(private val context: Context) {
     val settings = WatchSettings(context)
 
     /** Shared-with-iPhone mode: the watch app's Bluetooth LE link to this phone. */
+    /** In-app self-update from the public GitHub release. */
+    val updater = Updater(context)
+
     val shared = com.coralcoder.iwatchbridge.shared.SharedLinkServer(context, scope) { hello ->
         // The watch's Bluetooth address rotates, so a shared watch is identified by name + model.
         val id = "shared:" + (hello.name + "|" + hello.model).hashCode().toUInt().toString(16)
@@ -114,6 +117,7 @@ class BridgeController(private val context: Context) {
         val canConnect = android.os.Build.VERSION.SDK_INT < 31 ||
             context.checkSelfPermission(android.Manifest.permission.BLUETOOTH_CONNECT) == android.content.pm.PackageManager.PERMISSION_GRANTED
         if (shared.enabled && canConnect) runCatching { shared.start() }
+        scope.launch { updater.check(auto = true) }
     }
 
     fun usbAdapters() = UsbHciTransport.adapters(context.getSystemService(UsbManager::class.java))

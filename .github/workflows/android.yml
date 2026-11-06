@@ -108,3 +108,20 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: gh release create "$GITHUB_REF_NAME" "${{ steps.release.outputs.apk }}" --generate-notes --title "$GITHUB_REF_NAME"
 
+      # Rolling "latest" release the app checks for self-update. Fixed asset URLs:
+      #   .../releases/download/latest/latest.json   (versionCode, versionName, apk URL)
+      #   .../releases/download/latest/iWatchBridge.apk
+      - name: Publish rolling release for in-app update
+        if: github.ref == 'refs/heads/main' && steps.release.outputs.apk
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CODE: ${{ steps.version.outputs.code }}
+          NAME: ${{ steps.version.outputs.name }}
+        run: |
+          cp "${{ steps.release.outputs.apk }}" "$RUNNER_TEMP/iWatchBridge.apk"
+          printf '{"versionCode": %s, "versionName": "%s", "apk": "https://github.com/%s/releases/download/latest/iWatchBridge.apk", "notes": "Automatic build from main."}\n' \
+            "$CODE" "$NAME" "$GITHUB_REPOSITORY" > "$RUNNER_TEMP/latest.json"
+          gh release view latest >/dev/null 2>&1 || gh release create latest \
+            --title "Latest build" --notes "Rolling build from main; the app updates itself from here." --latest=false
+          gh release upload latest "$RUNNER_TEMP/iWatchBridge.apk" "$RUNNER_TEMP/latest.json" --clobber
+
