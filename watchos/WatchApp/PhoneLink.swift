@@ -1,5 +1,6 @@
 import CoreBluetooth
 import Foundation
+import UserNotifications
 import WatchKit
 
 /// The watch's Bluetooth LE link to the Android phone (Shared-with-iPhone mode).
@@ -25,6 +26,27 @@ final class PhoneLink: NSObject, ObservableObject {
     override init() {
         super.init()
         central = CBCentralManager(delegate: self, queue: .main)
+        UNUserNotificationCenter.current().delegate = self
+        // Ask once for permission to show the phone's notifications on the wrist.
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
+    }
+
+    /// Raise an Android notification as a real watchOS notification (banner + sound on the wrist),
+    /// not just a row inside the app. Delivered immediately (nil trigger).
+    private func present(_ n: PhoneNotification) {
+        let content = UNMutableNotificationContent()
+        content.title = n.title.isEmpty ? n.appName : n.title
+        content.subtitle = n.title.isEmpty ? "" : n.appName
+        content.body = n.body
+        content.sound = .default
+        content.threadIdentifier = n.app
+        let req = UNNotificationRequest(identifier: n.id, content: content, trigger: nil)
+        UNUserNotificationCenter.current().add(req)
+    }
+
+    private func clearPresented(_ id: String) {
+        UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: [id])
+        UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: [id])
     }
 
     // MARK: actions
@@ -86,8 +108,10 @@ final class PhoneLink: NSObject, ObservableObject {
             notifications.removeAll { $0.id == n.id }
             notifications.insert(n, at: 0)
             WKInterfaceDevice.current().play(.notification)
+            present(n)
         case let .notificationRemoved(id):
             notifications.removeAll { $0.id == id }
+            clearPresented(id)
         case let .media(title, artist, app, playing, volume):
             nowPlaying = (title, artist, app, playing, volume)
         default: break
@@ -174,5 +198,16 @@ extension PhoneLink: CBPeripheralDelegate {
             if !writeQueue.isEmpty { writeQueue.removeFirst() }
             pump()
         }
+    }
+}
+
+extension PhoneLink: UNUserNotificationCenterDelegate {
+    // Show the banner and play the sound even when Bridge is the frontmost app.
+    nonisolated func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        willPresent notification: UNNotification,
+        withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
+    ) {
+        completionHandler([.banner, .sound, .list])
     }
 }
