@@ -5,7 +5,7 @@ Legend: ✅ done and unit-tested · 🟡 implemented, not yet checked against a 
 ## Shared with iPhone mode
 - ✅ Link protocol (GATT service, chunking, JSON messages), shared by Kotlin and Swift
 - 🟡 Android GATT server: notifications (with reply/dismiss), now playing and media control, Find My Phone, phone battery; several watches at once; shared watches listed in My Watch / All Watches; restarts with the app and after reboot
-- 🟡 Watch app (watchOS 10+): notifications, media remote, Find Phone, phone battery
+- 🟡 Watch app (watchOS 10+): notifications, media remote, Find Phone, phone battery — compiles/archives clean in CI (TestFlight upload wired)
 - ⬜ Watch app background delivery: watchOS keeps BLE alive only while the app runs or in
   extended-runtime sessions. Next is a relay over APNs for when the app is closed.
 
