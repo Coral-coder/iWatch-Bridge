@@ -30,6 +30,7 @@ import com.coralcoder.iwatchbridge.core.NotificationQueue
 import com.coralcoder.iwatchbridge.protocol.shared.Message
 import com.coralcoder.iwatchbridge.protocol.shared.SharedLink
 import com.coralcoder.iwatchbridge.service.NotificationRelayService
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -37,10 +38,11 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.LinkedBlockingQueue
 
 /**
  * Shared-with-iPhone mode, phone side: a GATT server the iWatch Bridge watch app connects to.
@@ -73,8 +75,13 @@ class SharedLinkServer(
     private val mtu = ConcurrentHashMap<String, Int>()
     private val inbound = ConcurrentHashMap<String, SharedLink.Reassembler>()
     private val devices = ConcurrentHashMap<String, BluetoothDevice>()
-    private val outQueue = ConcurrentHashMap<String, LinkedBlockingQueue<ByteArray>>()
-    private val sending = ConcurrentHashMap<String, Boolean>()
+    // One notification chunk is in flight at a time, across all watches. The sender waits for the
+    // controller to confirm each chunk (onNotificationSent) and retries instead of dropping, so a
+    // momentarily full BLE buffer never loses a notification. Over BLE these notifications are
+    // link-layer reliable; the old code lost them in app-level flow control.
+    private val sendChannel = Channel<Outgoing>(Channel.UNLIMITED)
+    @Volatile private var ack = CompletableDeferred<Boolean>().apply { complete(true) }
+    @Volatile private var ackAddress: String? = null
     private var jobs = mutableListOf<Job>()
     private var ringtone: Ringtone? = null
 
@@ -125,7 +132,32 @@ class SharedLinkServer(
         jobs += scope.launch {
             while (isActive) { broadcast(phoneStatus()); nowPlaying()?.let { broadcast(it) }; delay(60_000) }
         }
+        jobs += scope.launch { runSender() }
     }
+
+    /** The single serialized notification sender: one chunk out, confirmed, then the next. */
+    private suspend fun runSender() {
+        for (out in sendChannel) {
+            val dev = devices[out.address] ?: continue // watch gone; drop its backlog
+            var delivered = false
+            var attempt = 0
+            while (!delivered && attempt < 40 && devices.containsKey(out.address)) {
+                attempt++
+                ack = CompletableDeferred()
+                ackAddress = out.address
+                val queued = rawNotify(dev, out.chunk)
+                delivered = if (queued) (withTimeoutOrNull(4000) { ack.await() } ?: false) else false
+                if (!delivered) delay(12L * attempt.coerceAtMost(12)) // let the BLE buffer drain, then retry
+            }
+        }
+    }
+
+    private fun rawNotify(device: BluetoothDevice, chunk: ByteArray): Boolean =
+        if (Build.VERSION.SDK_INT >= 33) {
+            server?.notifyCharacteristicChanged(device, toWatch, false, chunk) == BluetoothGatt.GATT_SUCCESS
+        } else {
+            @Suppress("DEPRECATION") run { toWatch.value = chunk; server?.notifyCharacteristicChanged(device, toWatch, false) == true }
+        }
 
     fun stop() {
         prefs.edit().putBoolean("enabled", false).apply()
@@ -137,7 +169,7 @@ class SharedLinkServer(
         runCatching { manager?.adapter?.bluetoothLeAdvertiser?.stopAdvertising(advertiseCallback) }
         runCatching { server?.close() }
         server = null
-        devices.clear(); mtu.clear(); inbound.clear(); outQueue.clear(); sending.clear()
+        devices.clear(); mtu.clear(); inbound.clear()
         _state.value = State()
     }
 
@@ -151,24 +183,10 @@ class SharedLinkServer(
 
     private fun send(address: String, m: Message) {
         val chunks = SharedLink.chunk(SharedLink.encode(m), (mtu[address] ?: 23) - 3)
-        val q = outQueue.getOrPut(address) { LinkedBlockingQueue() }
-        chunks.forEach(q::add)
-        pump(address)
+        chunks.forEach { sendChannel.trySend(Outgoing(address, it)) }
     }
 
-    /** One notification in flight per device; the next goes out in onNotificationSent. */
-    private fun pump(address: String) {
-        if (sending[address] == true) return
-        val chunk = outQueue[address]?.poll() ?: return
-        val dev = devices[address] ?: return
-        sending[address] = true
-        val ok = if (Build.VERSION.SDK_INT >= 33) {
-            server?.notifyCharacteristicChanged(dev, toWatch, false, chunk) == BluetoothGatt.GATT_SUCCESS
-        } else {
-            @Suppress("DEPRECATION") run { toWatch.value = chunk; server?.notifyCharacteristicChanged(dev, toWatch, false) == true }
-        }
-        if (!ok) sending[address] = false
-    }
+    private data class Outgoing(val address: String, val chunk: ByteArray)
 
     private fun onMessage(address: String, m: Message) {
         when (m) {
@@ -253,7 +271,6 @@ class SharedLinkServer(
                 devices[device.address] = device; update(device.address) { it }
             } else {
                 devices.remove(device.address); mtu.remove(device.address); inbound.remove(device.address)
-                outQueue.remove(device.address); sending.remove(device.address)
                 _state.value = _state.value.copy(watches = _state.value.watches - device.address)
             }
         }
@@ -261,8 +278,7 @@ class SharedLinkServer(
         override fun onMtuChanged(device: BluetoothDevice, m: Int) { mtu[device.address] = m }
 
         override fun onNotificationSent(device: BluetoothDevice, status: Int) {
-            sending[device.address] = false
-            pump(device.address)
+            if (ackAddress == device.address && ack.isActive) ack.complete(status == BluetoothGatt.GATT_SUCCESS)
         }
 
         override fun onDescriptorWriteRequest(device: BluetoothDevice, requestId: Int, descriptor: BluetoothGattDescriptor, preparedWrite: Boolean, responseNeeded: Boolean, offset: Int, value: ByteArray) {
