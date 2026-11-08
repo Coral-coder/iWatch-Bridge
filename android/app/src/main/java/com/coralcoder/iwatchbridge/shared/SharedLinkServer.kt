@@ -34,8 +34,11 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.channels.Channel
@@ -57,7 +60,9 @@ class SharedLinkServer(
     private val onWatchHello: (Message.WatchHello) -> Unit = {},
 ) {
     data class WatchConn(val address: String, val name: String = "Apple Watch", val model: String = "", val os: String = "", val battery: Int = -1, val subscribed: Boolean = false)
-    data class State(val running: Boolean = false, val watches: Map<String, WatchConn> = emptyMap(), val error: String? = null) {
+    data class State(val running: Boolean = false, val advertising: Boolean = false, val watches: Map<String, WatchConn> = emptyMap(), val error: String? = null) {
+        val connected get() = watches.size
+        val ready get() = watches.values.count { it.subscribed }
         val status: String get() = when {
             error != null -> error
             !running -> "Off"
@@ -68,6 +73,15 @@ class SharedLinkServer(
 
     private val _state = MutableStateFlow(State())
     val state: StateFlow<State> = _state.asStateFlow()
+
+    // Human-readable trace of the shared link, shown on the Bridge screen so connection problems
+    // are visible instead of a silent 'Waiting for watch app'.
+    private val _log = MutableSharedFlow<String>(replay = 120, extraBufferCapacity = 120)
+    val log: SharedFlow<String> = _log.asSharedFlow()
+    private fun log(msg: String) {
+        val t = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.US).format(java.util.Date())
+        _log.tryEmit("$t  $msg")
+    }
 
     private val manager = context.getSystemService(BluetoothManager::class.java)
     private var server: BluetoothGattServer? = null
@@ -86,7 +100,14 @@ class SharedLinkServer(
     private var ringtone: Ringtone? = null
 
     private val advertiseCallback = object : AdvertiseCallback() {
-        override fun onStartFailure(errorCode: Int) { _state.value = _state.value.copy(error = "Couldn't advertise (error $errorCode)") }
+        override fun onStartSuccess(settingsInEffect: AdvertiseSettings?) {
+            _state.value = _state.value.copy(advertising = true)
+            log("Advertising to the watch app; open Bridge on your Apple Watch")
+        }
+        override fun onStartFailure(errorCode: Int) {
+            _state.value = _state.value.copy(error = "Couldn't advertise (error $errorCode)")
+            log("Advertise failed: error $errorCode (need the Nearby devices permission?)")
+        }
     }
 
     private val prefs = context.getSharedPreferences("shared_link", Context.MODE_PRIVATE)
@@ -97,8 +118,8 @@ class SharedLinkServer(
         if (_state.value.running) return
         prefs.edit().putBoolean("enabled", true).apply()
         val adapter = manager?.adapter
-        if (adapter == null || !adapter.isEnabled) { _state.value = State(error = "Turn on Bluetooth"); return }
-        val s = manager.openGattServer(context, callback) ?: run { _state.value = State(error = "Bluetooth GATT unavailable"); return }
+        if (adapter == null || !adapter.isEnabled) { _state.value = State(error = "Turn on Bluetooth"); log("Bluetooth is off"); return }
+        val s = manager.openGattServer(context, callback) ?: run { _state.value = State(error = "Bluetooth GATT unavailable"); log("openGattServer returned null"); return }
         toWatch = BluetoothGattCharacteristic(UUID.fromString(SharedLink.TO_WATCH),
             BluetoothGattCharacteristic.PROPERTY_NOTIFY or BluetoothGattCharacteristic.PROPERTY_READ, BluetoothGattCharacteristic.PERMISSION_READ).apply {
             addDescriptor(BluetoothGattDescriptor(CCCD, BluetoothGattDescriptor.PERMISSION_READ or BluetoothGattDescriptor.PERMISSION_WRITE))
@@ -115,6 +136,8 @@ class SharedLinkServer(
             advertiseCallback,
         )
         _state.value = State(running = true)
+        log("Sharing started")
+        if (adapter.bluetoothLeAdvertiser == null) { _state.value = _state.value.copy(error = "This phone can't advertise over Bluetooth LE"); log("bluetoothLeAdvertiser is null") }
         com.coralcoder.iwatchbridge.service.BridgeService.startNow(context)
 
         jobs += scope.launch {
@@ -180,6 +203,23 @@ class SharedLinkServer(
     }
 
     fun broadcast(m: Message) = devices.keys.filter { _state.value.watches[it]?.subscribed == true }.forEach { send(it, m) }
+
+    /**
+     * Inject a test notification through the real delivery path (collector is bypassed; this goes
+     * straight to broadcast). Returns how many watches it was sent to, so the UI can report it.
+     */
+    fun sendTest(): Int {
+        val targets = _state.value.watches.values.count { it.subscribed }
+        val n = Message.Notification(
+            id = "test-" + System.currentTimeMillis(), app = context.packageName, appName = "iWatch Bridge",
+            title = "Test notification", body = "If you can see this on your watch, the link works.",
+            time = System.currentTimeMillis(),
+        )
+        if (targets == 0) log("Test tapped, but no watch is connected and subscribed yet")
+        else log("Test notification sent to $targets watch(es)")
+        broadcast(n)
+        return targets
+    }
 
     private fun send(address: String, m: Message) {
         val chunks = SharedLink.chunk(SharedLink.encode(m), (mtu[address] ?: 23) - 3)
@@ -269,9 +309,11 @@ class SharedLinkServer(
         override fun onConnectionStateChange(device: BluetoothDevice, status: Int, newState: Int) {
             if (newState == BluetoothProfile.STATE_CONNECTED) {
                 devices[device.address] = device; update(device.address) { it }
+                log("Watch connected (${device.address})")
             } else {
                 devices.remove(device.address); mtu.remove(device.address); inbound.remove(device.address)
                 _state.value = _state.value.copy(watches = _state.value.watches - device.address)
+                log("Watch disconnected (${device.address}), status $status")
             }
         }
 
@@ -282,7 +324,11 @@ class SharedLinkServer(
         }
 
         override fun onDescriptorWriteRequest(device: BluetoothDevice, requestId: Int, descriptor: BluetoothGattDescriptor, preparedWrite: Boolean, responseNeeded: Boolean, offset: Int, value: ByteArray) {
-            if (descriptor.uuid == CCCD) update(device.address) { it.copy(subscribed = value.isNotEmpty() && value[0].toInt() and 1 == 1) }
+            if (descriptor.uuid == CCCD) {
+                val sub = value.isNotEmpty() && value[0].toInt() and 1 == 1
+                update(device.address) { it.copy(subscribed = sub) }
+                log(if (sub) "Watch app subscribed — link ready" else "Watch app unsubscribed")
+            }
             if (responseNeeded) server?.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, 0, null)
         }
 
