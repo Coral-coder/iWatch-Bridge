@@ -40,3 +40,27 @@ Legend: ✅ done and unit-tested · 🟡 implemented, not yet checked against a 
 Every 🟡 row has to be checked against hardware with an HCI capture (Android's "Bluetooth HCI snoop
 log", or btmon with a USB adapter). WatchWitch's Wireshark dissectors
 (seemoo-lab/watchwitch-wireshark) decode Magnet, NRLP, Alloy and NWSC from such captures.
+
+## Feature parity (vs. Merge, the one real competitor)
+
+Merge (Merge Labs) is the only maintained Apple-Watch-to-Android app. It's subscription-gated
+(~$6/mo), and its top user complaints are notification lag from Android battery optimization,
+BLE disconnects/drain, and the paywall. A free/open-source app that is reliable is the opening.
+
+Already built here (shared mode):
+- ✅ Notification mirroring, per-app filtering, reply, dismiss
+- ✅ Media control (play/pause/next/prev/volume) + now playing
+- ✅ Find My Phone (ring), phone battery on the watch
+- ✅ Multiple watches / active-watch switching
+
+Merge has that we don't yet (ranked):
+1. ⬜ **Health/activity sync** watch→phone into Health Connect (heart rate, steps, sleep,
+   calories, workouts). This is Merge's core value — build first after the link is solid.
+2. ⬜ ECG sync (Series 4+) → Android.
+3. ⬜ Glucose (Health Connect → watch).
+4. ⬜ Calls (answer/decline/dial) — limited by watchOS without native telephony; investigate.
+5. ⬜ Over-internet relay when not in Bluetooth range (needs a relay; APNs for the watch side).
+
+Reliability work (the real differentiator, since Merge is flaky):
+- ⬜ Battery-optimization exemption prompt + setup wizard (Android kills the companion service).
+- ⬜ Robust reconnect, watch battery to phone, connection health UI (started: shared-mode log).
