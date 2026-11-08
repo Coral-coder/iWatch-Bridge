@@ -110,17 +110,29 @@ struct PhoneView: View {
     }
 
     var body: some View {
-        VStack(spacing: 8) {
-            Image(systemName: "candybarphone").font(.largeTitle)
-            Text(link.phoneName).font(.headline)
-            Text(statusText).font(.footnote).foregroundStyle(link.status == .connected ? .green : .secondary)
-            if link.phoneBattery >= 0 {
-                Label("\(link.phoneBattery)%", systemImage: link.phoneCharging ? "battery.100.bolt" : "battery.75")
-                    .font(.footnote)
+        ScrollView {
+            VStack(spacing: 8) {
+                Image(systemName: "candybarphone").font(.largeTitle)
+                Text(link.phoneName).font(.headline)
+                Text(statusText).font(.footnote).foregroundStyle(link.status == .connected ? .green : .secondary)
+                if link.phoneBattery >= 0 {
+                    Label("\(link.phoneBattery)%", systemImage: link.phoneCharging ? "battery.100.bolt" : "battery.75")
+                        .font(.footnote)
+                }
+                Button(link.ringing ? "Stop" : "Ping Phone") { link.findPhone(!link.ringing) }
+                    .tint(link.ringing ? .red : .blue)
+                    .disabled(link.status != .connected)
+
+                if !link.diagnostics.isEmpty {
+                    Divider()
+                    Text("Connection log").font(.caption2).foregroundStyle(.secondary)
+                    ForEach(Array(link.diagnostics.suffix(12).enumerated()), id: \.offset) { _, line in
+                        Text(line).font(.system(size: 10, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
             }
-            Button(link.ringing ? "Stop" : "Ping Phone") { link.findPhone(!link.ringing) }
-                .tint(link.ringing ? .red : .blue)
-                .disabled(link.status != .connected)
         }
     }
 }

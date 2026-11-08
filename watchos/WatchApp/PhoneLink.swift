@@ -15,6 +15,8 @@ final class PhoneLink: NSObject, ObservableObject {
     @Published private(set) var notifications: [PhoneNotification] = []
     @Published private(set) var nowPlaying: (title: String, artist: String, app: String, playing: Bool, volume: Int)?
     @Published var ringing = false
+    /// A short on-watch trace so connection problems are visible on the wrist, not silent.
+    @Published private(set) var diagnostics: [String] = []
 
     private var central: CBCentralManager!
     private var peripheral: CBPeripheral?
@@ -22,6 +24,13 @@ final class PhoneLink: NSObject, ObservableObject {
     private let reassembler = SharedLink.Reassembler()
     private var writeQueue: [Data] = []
     private let knownKey = "phonePeripheral"
+    private var watchdog: Task<Void, Never>?
+
+    private func note(_ s: String) {
+        let t = Date().formatted(date: .omitted, time: .standard)
+        diagnostics.append("\(t)  \(s)")
+        if diagnostics.count > 80 { diagnostics.removeFirst(diagnostics.count - 80) }
+    }
 
     override init() {
         super.init()
@@ -86,10 +95,12 @@ final class PhoneLink: NSObject, ObservableObject {
         // Reconnect straight to the phone we used last time; otherwise look for the service.
         if let s = UserDefaults.standard.string(forKey: knownKey), let id = UUID(uuidString: s),
            let p = central.retrievePeripherals(withIdentifiers: [id]).first {
+            note("Reconnecting to the last phone")
             connect(p)
         } else {
             status = .searching
         }
+        note("Scanning for the Bridge phone app")
         central.scanForPeripherals(withServices: [SharedLink.service])
     }
 
@@ -98,6 +109,19 @@ final class PhoneLink: NSObject, ObservableObject {
         p.delegate = self
         status = .connecting
         central.connect(p)
+        // If it doesn't reach "ready" in time, the peripheral is likely stale (Android rotates its
+        // Bluetooth address); drop it and scan again.
+        watchdog?.cancel()
+        watchdog = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 12_000_000_000)
+            guard let self, !Task.isCancelled else { return }
+            if self.status != .connected {
+                self.note("Connect timed out; rescanning")
+                self.central.cancelPeripheralConnection(p)
+                self.peripheral = nil
+                self.scan()
+            }
+        }
     }
 
     private func handle(_ m: LinkMessage) {
@@ -123,8 +147,9 @@ extension PhoneLink: CBCentralManagerDelegate {
     nonisolated func centralManagerDidUpdateState(_ central: CBCentralManager) {
         MainActor.assumeIsolated {
             switch central.state {
-            case .poweredOn: scan()
-            case .unauthorized: status = .unauthorized
+            case .poweredOn: note("Bluetooth on"); scan()
+            case .unauthorized: note("Bluetooth not allowed — enable it in Settings"); status = .unauthorized
+            case .poweredOff: note("Bluetooth is off"); status = .bluetoothOff
             default: status = .bluetoothOff
             }
         }
@@ -133,6 +158,7 @@ extension PhoneLink: CBCentralManagerDelegate {
     nonisolated func centralManager(_ central: CBCentralManager, didDiscover peripheral: CBPeripheral, advertisementData: [String: Any], rssi RSSI: NSNumber) {
         MainActor.assumeIsolated {
             guard status == .searching || status == .connecting, self.peripheral?.state != .connected else { return }
+            note("Found a phone (\(RSSI) dBm); connecting")
             // Android rotates its Bluetooth address, so a remembered peripheral may never answer;
             // drop that pending connect in favour of the phone we can actually see.
             if let old = self.peripheral, old.identifier != peripheral.identifier { central.cancelPeripheralConnection(old) }
@@ -143,6 +169,7 @@ extension PhoneLink: CBCentralManagerDelegate {
 
     nonisolated func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
         MainActor.assumeIsolated {
+            note("Connected; finding the Bridge service")
             UserDefaults.standard.set(peripheral.identifier.uuidString, forKey: knownKey)
             central.stopScan()
             peripheral.discoverServices([SharedLink.service])
@@ -150,14 +177,16 @@ extension PhoneLink: CBCentralManagerDelegate {
     }
 
     nonisolated func centralManager(_ central: CBCentralManager, didFailToConnect peripheral: CBPeripheral, error: Error?) {
-        MainActor.assumeIsolated { self.peripheral = nil; scan() }
+        MainActor.assumeIsolated { note("Connect failed: \(error?.localizedDescription ?? "unknown")"); self.peripheral = nil; scan() }
     }
 
     nonisolated func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) {
         MainActor.assumeIsolated {
+            note("Disconnected: \(error?.localizedDescription ?? "closed")")
             toPhone = nil; writeQueue.removeAll()
-            status = .connecting
-            central.connect(peripheral) // pending connect: completes when the phone is back in range
+            status = .searching
+            // Re-scan rather than only waiting on this peripheral, since its address may have changed.
+            scan()
         }
     }
 }
@@ -165,7 +194,9 @@ extension PhoneLink: CBCentralManagerDelegate {
 extension PhoneLink: CBPeripheralDelegate {
     nonisolated func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
         MainActor.assumeIsolated {
-            guard let s = peripheral.services?.first(where: { $0.uuid == SharedLink.service }) else { return }
+            guard let s = peripheral.services?.first(where: { $0.uuid == SharedLink.service }) else {
+                note("Bridge service not found on this phone"); return
+            }
             peripheral.discoverCharacteristics([SharedLink.toWatch, SharedLink.toPhone], for: s)
         }
     }
@@ -181,7 +212,12 @@ extension PhoneLink: CBPeripheralDelegate {
 
     nonisolated func peripheral(_ peripheral: CBPeripheral, didUpdateNotificationStateFor characteristic: CBCharacteristic, error: Error?) {
         MainActor.assumeIsolated {
-            if characteristic.isNotifying { status = .connected; hello() }
+            if characteristic.isNotifying {
+                watchdog?.cancel()
+                status = .connected
+                note("Link ready")
+                hello()
+            }
         }
     }
 
